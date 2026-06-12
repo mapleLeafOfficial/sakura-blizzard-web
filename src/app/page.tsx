@@ -1,42 +1,21 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
-import { SakuraCanvas } from "../components/SakuraCanvas";
+import { useState, type CSSProperties } from "react";
+import { SakuraBlizzard } from "../components/SakuraBlizzard";
 import { EnumDropType } from "../lib/EnumDropType";
-import { VRange } from "../lib/math/VRange";
 
 ///
-// (en) Demo page: switch between the 5 drop-physics algorithms to compare.
-//      Every motion here is computed by the 1:1-ported physics + engine,
-//      not hand-rolled CSS animation.
-// (ja) デモページ: 5種類の落下物理アルゴリズムを切り替えて比較。
+// (en) Demo page for the public `SakuraBlizzard` component. Showcases the
+//      master switch (on/off), the two featured modes + the three kept modes,
+//      and the live speed control — all via the single encapsulated component.
+// (ja) 公開コンポーネント SakuraBlizzard のデモページ。
 ///
-const PRESETS: { key: EnumDropType; label: string; desc: string }[] = [
-  {
-    key: EnumDropType.hirahiraDrop,
-    label: "Hirahira 樱花飘落",
-    desc: "招牌算法:正弦波左右摇曳 + 缓慢下落(HirahiraDropPhysics)",
-  },
-  {
-    key: EnumDropType.spinDrop3D,
-    label: "SpinDrop3D 三维翻滚",
-    desc: "绕 (1,1,0) 轴 3D 翻滚下落(SpinDrop3DPhysics)",
-  },
-  {
-    key: EnumDropType.rotatingDrop,
-    label: "RotatingDrop 平面旋转",
-    desc: "绕屏幕法线 z 轴平面旋转下落(RotatingDropPhysics)",
-  },
-  {
-    key: EnumDropType.basicDrop,
-    label: "BasicDrop 直线下落",
-    desc: "无旋转,匀速直线下落(BasicDropPhysics)",
-  },
-  {
-    key: EnumDropType.rainDrop,
-    label: "RainDrop 高速直落",
-    desc: "12 倍速直线(用花瓣模拟雨,RainDropPhysics)",
-  },
+const PRESETS: { key: EnumDropType; label: string; desc: string; featured?: boolean }[] = [
+  { key: EnumDropType.hirahiraDrop, label: "樱花飘落 Hirahira", desc: "招牌算法:正弦波左右摇曳 + 缓慢下落", featured: true },
+  { key: EnumDropType.spinDrop3D, label: "3D旋转 SpinDrop3D", desc: "绕 (1,1,0) 轴 3D 翻滚下落", featured: true },
+  { key: EnumDropType.rotatingDrop, label: "平面旋转 Rotating", desc: "绕屏幕法线 z 轴平面旋转" },
+  { key: EnumDropType.basicDrop, label: "直线下落 Basic", desc: "无旋转,匀速直线下落" },
+  { key: EnumDropType.rainDrop, label: "高速直落 Rain", desc: "12 倍速直线(花瓣模拟雨)" },
 ];
 
 function btnStyle(active: boolean): CSSProperties {
@@ -53,37 +32,16 @@ function btnStyle(active: boolean): CSSProperties {
 }
 
 export default function Page() {
-  const [size, setSize] = useState({ width: 1024, height: 768 });
+  const [on, setOn] = useState(true);
   const [dropType, setDropType] = useState<EnumDropType>(EnumDropType.hirahiraDrop);
   const [num, setNum] = useState(40);
-
-  useEffect(() => {
-    const update = () =>
-      setSize({ width: window.innerWidth, height: window.innerHeight });
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
+  const [speed, setSpeed] = useState(1);
 
   const preset = PRESETS.find((p) => p.key === dropType)!;
 
-  const config = {
-    viewSize: size,
-    fps: 60,
-    dropType,
-    frontObjNum: num,
-    backObjNum: num,
-    frontObjSize: new VRange(8, 32),
-    backObjSize: new VRange(8, 32),
-    isRandomPositionY: true,
-    enablePositionReset: true,
-    resetRandomX: true,
-    minBrightness: 0.93,
-  };
-
   return (
     <main style={{ position: "fixed", inset: 0, overflow: "hidden" }}>
-      <SakuraCanvas config={config}>
+      <SakuraBlizzard enabled={on} mode={dropType} speed={speed} density={num}>
         <div
           style={{
             display: "flex",
@@ -100,9 +58,9 @@ export default function Page() {
           <h1 style={{ fontSize: 72, fontWeight: 300, letterSpacing: 4 }}>桜 Sakura</h1>
           <p style={{ fontSize: 16, color: "#777", marginTop: 8 }}>{preset.desc}</p>
         </div>
-      </SakuraCanvas>
+      </SakuraBlizzard>
 
-      {/* Physics selector */}
+      {/* 模式 + 总开关 */}
       <div
         style={{
           position: "absolute",
@@ -111,6 +69,7 @@ export default function Page() {
           display: "flex",
           gap: 8,
           flexWrap: "wrap",
+          alignItems: "center",
           zIndex: 10,
           maxWidth: "calc(100% - 24px)",
         }}
@@ -120,13 +79,26 @@ export default function Page() {
             key={p.key}
             onClick={() => setDropType(p.key)}
             style={btnStyle(p.key === dropType)}
+            title={p.featured ? "主打模式" : "保留的下落算法"}
           >
             {p.label}
+            {p.featured ? " ★" : ""}
           </button>
         ))}
+        <button
+          onClick={() => setOn((v) => !v)}
+          style={{
+            ...btnStyle(false),
+            background: on ? "rgba(80,200,120,0.9)" : "rgba(200,80,80,0.9)",
+            color: "#fff",
+            fontWeight: 600,
+          }}
+        >
+          {on ? "● 开" : "○ 关"}
+        </button>
       </div>
 
-      {/* Controls + provenance */}
+      {/* 速度 + 数量 + 说明 */}
       <div
         style={{
           position: "absolute",
@@ -142,7 +114,20 @@ export default function Page() {
           backdropFilter: "blur(4px)",
         }}
       >
-        <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span>速度</span>
+          <input
+            type="range"
+            min={0}
+            max={2}
+            step={0.1}
+            value={speed}
+            onChange={(e) => setSpeed(parseFloat(e.target.value))}
+            style={{ width: 140, accentColor: "#e0709a" }}
+          />
+          <span style={{ color: "#e0709a", minWidth: 40 }}>{speed.toFixed(1)}×</span>
+        </div>
+        <div style={{ marginTop: 6 }}>
           每层数量: {num}{" "}
           <button
             onClick={() => setNum(Math.max(5, num - 10))}
@@ -158,8 +143,8 @@ export default function Page() {
           </button>
         </div>
         <div style={{ opacity: 0.8, marginTop: 4 }}>
-          核心算法 1:1 移植自 sakura_blizzard v6.1.2 (Flutter/Dart) ·
-          speed=60/fps 归一化 · Y 轴朝下 · 固定时间步长
+          公共组件 <code>&lt;SakuraBlizzard enabled mode speed /&gt;</code> ·
+          核心 1:1 移植自 sakura_blizzard v6.1.2 · speed=60/fps
         </div>
       </div>
     </main>

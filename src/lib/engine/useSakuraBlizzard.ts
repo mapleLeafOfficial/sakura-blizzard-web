@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import type { Size } from "../math/Size";
 import { VRange } from "../math/VRange";
+import type { Sp3dColor } from "../colors/SakuraBlizzardMaterials";
 import { EnumDropType } from "../EnumDropType";
 import {
   createSakuraPetalObj,
@@ -23,8 +24,14 @@ export interface SakuraBlizzardConfig {
   isRandomPositionY: boolean;
   enablePositionReset: boolean;
   resetRandomX: boolean;
-  /// Back-layer brightness (approximates Sp3dLight.minBrightness). 0..1.
-  minBrightness: number;
+  /// Brightness when a face fully faces the camera. >1 brightens it (tuned).
+  litBri: number;
+  /// Brightness floor when a face is turned away (shadow).
+  shadowBri: number;
+  /// Global speed multiplier (1 = source speed, 0 = freeze, 2 = 2×). Read live.
+  speedScale: number;
+  /// Petal fill color (RGB 0-255), applied to every petal at creation.
+  color: Sp3dColor;
 }
 
 ///
@@ -60,24 +67,24 @@ export function useSakuraBlizzard(config: SakuraBlizzardConfig) {
     const front: Sp3dObj[] = [];
     const back: Sp3dObj[] = [];
     for (let i = 0; i < c.frontObjNum; i++) {
-      front.push(
-        createSakuraPetalObj(
-          c.viewSize,
-          c.frontObjSize,
-          getDropPhysics(c.dropType, c.viewSize, c.fps),
-          c.isRandomPositionY,
-        ),
+      const o = createSakuraPetalObj(
+        c.viewSize,
+        c.frontObjSize,
+        getDropPhysics(c.dropType, c.viewSize, c.fps),
+        c.isRandomPositionY,
       );
+      o.material = c.color;
+      front.push(o);
     }
     for (let i = 0; i < c.backObjNum; i++) {
-      back.push(
-        createSakuraPetalObj(
-          c.viewSize,
-          c.backObjSize,
-          getDropPhysics(c.dropType, c.viewSize, c.fps),
-          c.isRandomPositionY,
-        ),
+      const o = createSakuraPetalObj(
+        c.viewSize,
+        c.backObjSize,
+        getDropPhysics(c.dropType, c.viewSize, c.fps),
+        c.isRandomPositionY,
       );
+      o.material = c.color;
+      back.push(o);
     }
 
     // Fixed-timestep loop (replaces Timer.periodic(1000 ~/ fps)).
@@ -96,6 +103,7 @@ export function useSakuraBlizzard(config: SakuraBlizzardConfig) {
       const opts = {
         enablePositionReset: configRef.current.enablePositionReset,
         resetRandomX: configRef.current.resetRandomX,
+        speedScale: configRef.current.speedScale,
       };
       const viewSize = configRef.current.viewSize;
       while (acc >= frameInterval && steps < 3) {
@@ -107,7 +115,13 @@ export function useSakuraBlizzard(config: SakuraBlizzardConfig) {
       if (steps > 0) {
         // Stack order: [backRenderer, child, frontRenderer] — child omitted here.
         // Stack order: [backRenderer, child, frontRenderer] — child omitted here.
-        drawScene(ctx, [back, front], viewSize, configRef.current.minBrightness);
+        drawScene(
+          ctx,
+          [back, front],
+          viewSize,
+          configRef.current.litBri,
+          configRef.current.shadowBri,
+        );
       }
     };
     raf = requestAnimationFrame(loop);
@@ -124,6 +138,7 @@ export function useSakuraBlizzard(config: SakuraBlizzardConfig) {
     config.backObjNum,
     config.isRandomPositionY,
     config.enablePositionReset,
+    config.color,
   ]);
 
   return canvasRef;

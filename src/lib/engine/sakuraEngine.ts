@@ -16,6 +16,9 @@ import type { Sp3dObj } from "./types";
 export interface EngineOptions {
   enablePositionReset: boolean;
   resetRandomX: boolean;
+  /// Global speed multiplier applied to every object's per-tick displacement
+  /// and rotation (1 = source speed). 0 freezes, 2 = twice as fast.
+  speedScale?: number;
 }
 
 /// 软件正交投影后的 2D 点。
@@ -64,10 +67,11 @@ export function updateObjPosition(
   const physics = obj.physics;
   if (!physics) return;
 
-  // obj.move(obj.physics!.velocity!) — read ONCE.
+  // obj.move(obj.physics!.velocity!) — read ONCE (advances internal state).
   const vel = physics.velocity;
   if (vel === null) return;
-  obj.position = obj.position.add(vel);
+  const s = opts.speedScale ?? 1;
+  obj.position = obj.position.add(vel.mul(s));
 
   // reset position
   if (obj.position.y < -1 * (viewSize.height / 8)) {
@@ -91,7 +95,7 @@ export function updateObjPosition(
   const axis = physics.rotateAxis;
   const av = physics.angularVelocity;
   if (axis !== null && av !== null) {
-    applyAngularDelta(obj, axis, av);
+    applyAngularDelta(obj, axis, av * s);
   }
 }
 
@@ -205,7 +209,8 @@ export function drawScene(
   ctx: CanvasRenderingContext2D,
   layers: Sp3dObj[][],
   viewSize: Size,
-  minBrightness: number,
+  litBri: number,
+  shadowBri: number,
 ): void {
   // Camera at screen center, looking toward -z (matches ElementsFlowView:
   // Sp3dOrthographicCamera at (w/2, h/2, 3000)).
@@ -263,7 +268,7 @@ export function drawScene(
 
   ctx.clearRect(0, 0, viewSize.width, viewSize.height);
   for (const f of faces) {
-    drawFace(ctx, f, minBrightness);
+    drawFace(ctx, f, litBri, shadowBri);
   }
 }
 
@@ -275,16 +280,19 @@ export function drawScene(
 function drawFace(
   ctx: CanvasRenderingContext2D,
   f: RenderFace,
-  minBrightness: number,
+  litBri: number,
+  shadowBri: number,
 ): void {
-  // Shading (1:1 Sp3dLight.apply, syncCam):
-  //   brightness = camTheta.clamp(0,1); if < minBrightness then minBrightness;
-  //   color = fillColor * brightness (per-channel RGB multiply).
-  const brightness = Math.max(minBrightness, Math.min(1, f.camTheta));
+  // Shading (Sp3dLight.apply, syncCam + tuned brightness range):
+  //   brightness interpolates in [shadowBri, litBri] over camTheta ∈ [0,1].
+  //   litBri > 1 brightens faces turned toward the camera (tuned in
+  //   petal-demo: pinker base + brighter lit end). color = fillColor * bri.
+  const t = Math.max(0, Math.min(1, f.camTheta));
+  const brightness = shadowBri + (litBri - shadowBri) * t;
+  const clip = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(v * brightness)));
   const { r, g, b } = f.material;
-  const col = `rgb(${Math.round(r * brightness)},${Math.round(
-    g * brightness,
-  )},${Math.round(b * brightness)})`;
+  const col = `rgb(${clip(r)},${clip(g)},${clip(b)})`;
   const p = f.pts;
   ctx.beginPath();
   ctx.moveTo(p[0].x, p[0].y);

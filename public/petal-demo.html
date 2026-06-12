@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>樱花花瓣 · 形状与色彩调节台</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #f6f5f1;
+    color: #222;
+    padding: 28px;
+    line-height: 1.6;
+  }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  h2 { font-size: 15px; margin: 16px 0 8px; color: #0F4761; }
+  .sub { color: #777; font-size: 13px; margin-bottom: 18px; }
+  .layout { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+  .panel { background: #fff; border: 1px solid #e8e6df; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+  .canvas-wrap { text-align: center; }
+  canvas { background: #fff; border-radius: 8px; display: block; }
+  .caption { font-size: 12px; color: #999; margin-top: 8px; }
+  .controls { width: 340px; }
+  .code-wrap { flex: 1; min-width: 360px; max-width: 760px; }
+
+  /* 预设按钮 */
+  .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 4px; }
+  .preset-btn {
+    text-align: left; cursor: pointer; border: 1px solid #e0d8d8;
+    background: #fff; border-radius: 8px; padding: 8px 10px; transition: .12s;
+  }
+  .preset-btn:hover { border-color: #e0709a; background: #fff7fa; }
+  .preset-btn.active { border-color: #e0709a; background: #fff0f5; box-shadow: 0 0 0 2px #e0709a33; }
+  .preset-btn .pn { font-size: 13px; font-weight: 600; }
+  .preset-btn .pd { font-size: 11px; color: #999; }
+  .preset-btn .pk { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; margin-right: 4px; border: 1px solid #00000018; }
+
+  /* 滑杆 */
+  .slider { display: grid; grid-template-columns: 92px 1fr 48px; align-items: center; gap: 8px; margin: 6px 0; font-size: 12.5px; }
+  .slider .lab { color: #555; }
+  .slider .val { text-align: right; color: #e0709a; font-variant-numeric: tabular-nums; font-size: 12px; }
+  input[type=range] { width: 100%; accent-color: #e0709a; }
+  select { width: 100%; padding: 4px 6px; border: 1px solid #ddd; border-radius: 6px; font-size: 12.5px; }
+
+  .row-btns { display: flex; gap: 8px; margin-top: 10px; }
+  .btn { flex: 1; cursor: pointer; border: 1px solid #ddd; background: #fff; border-radius: 8px; padding: 7px; font-size: 12.5px; }
+  .btn:hover { background: #fafafa; }
+  .btn.primary { background: #e0709a; color: #fff; border-color: #e0709a; }
+
+  .swatches { display: flex; gap: 10px; margin-top: 10px; font-size: 11px; color: #888; }
+  .sw { display: flex; align-items: center; gap: 5px; }
+  .sw .box { width: 26px; height: 16px; border-radius: 4px; border: 1px solid #00000020; }
+
+  .readout {
+    margin-top: 12px; padding: 10px; background: #1e1e2e; color: #cdd6f4;
+    border-radius: 8px; font-size: 11.5px; line-height: 1.7;
+    font-family: "Cascadia Code", Consolas, monospace; white-space: pre-wrap; word-break: break-all;
+  }
+  .readout b { color: #f9e2af; }
+
+  .info { font-size: 12px; color: #666; margin-top: 8px; padding: 10px 12px; background: #faf8f2; border-radius: 6px; border-left: 3px solid #e0709a; }
+  .info b { color: #444; }
+  .info ul { margin: 4px 0 0 16px; }
+  .info li { margin: 2px 0; }
+
+  pre {
+    background: #1e1e2e; color: #e0e0e0; padding: 16px; border-radius: 8px; overflow: auto;
+    font-size: 12px; line-height: 1.65; font-family: "Cascadia Code", "Fira Code", Consolas, monospace; tab-size: 2;
+  }
+  .kw { color: #c792ea; } .str { color: #c3e88d; } .num { color: #f78c6c; }
+  .com { color: #6b7394; font-style: italic; } .fn { color: #82aaff; }
+  .hint { font-size: 12px; color: #888; margin-top: 12px; padding: 10px 12px; background: #faf8f2; border-radius: 6px; border-left: 3px solid #e0709a; }
+</style>
+</head>
+<body>
+<h1>樱花花瓣 · 形状与色彩调节台</h1>
+<div class="sub">左侧实时预览(单片花瓣做 3D 翻转),右侧/下方调节色相、饱和度、最亮增益、阴影、形状。调到满意后,把「当前数值」抄走即可。整个文件自包含,可单独拿走。</div>
+
+<div class="layout">
+  <div class="panel canvas-wrap">
+    <canvas id="cv" width="380" height="420"></canvas>
+    <div class="caption">Canvas 2D · 软件三维管线(贝塞尔轮廓 + camTheta 光照 + 背面剔除)</div>
+    <div class="swatches">
+      <div class="sw">最亮 <span class="box" id="swMax"></span></div>
+      <div class="sw">最暗 <span class="box" id="swMin"></span></div>
+    </div>
+    <div class="row-btns">
+      <button class="btn" id="pauseBtn">暂停</button>
+      <button class="btn" id="resetBtn">重置默认</button>
+    </div>
+  </div>
+
+  <div class="panel controls">
+    <h2>① 真实樱花品种(预设)</h2>
+    <div class="info">
+      <b>真实樱花花瓣的关键特征:</b>
+      <ul>
+        <li><b>先端凹口(えぐれ)</b>——樱属 Prunus 最具识别度的特征,一片心形凹缺;</li>
+        <li>整体<b>倒卵形</b>,靠近凹口处最宽,向基部(花心着生点)收尖;</li>
+        <li>常带<b>轻微不对称</b>;品种间在大小、长宽比、凹口深浅、颜色上差异明显。</li>
+      </ul>
+    </div>
+    <div class="presets" id="presets"></div>
+
+    <h2>② 色彩与亮度</h2>
+    <div class="slider"><span class="lab">色相 Hue</span><input type="range" id="hue" min="300" max="360" step="1" value="343"><span class="val" id="hueV"></span></div>
+    <div class="slider"><span class="lab">饱和度 Sat</span><input type="range" id="sat" min="20" max="100" step="1" value="88"><span class="val" id="satV"></span></div>
+    <div class="slider"><span class="lab">明度 Light</span><input type="range" id="light" min="55" max="98" step="1" value="86"><span class="val" id="lightV"></span></div>
+    <div class="slider"><span class="lab">最亮增益 Lit</span><input type="range" id="litBri" min="1.00" max="1.60" step="0.01" value="1.20"><span class="val" id="litBriV"></span></div>
+    <div class="slider"><span class="lab">阴影底 Shade</span><input type="range" id="shadowBri" min="0.20" max="0.95" step="0.01" value="0.50"><span class="val" id="shadowBriV"></span></div>
+    <div class="slider"><span class="lab">饱和增强 Sat+</span><input type="range" id="satBoost" min="100" max="180" step="1" value="100"><span class="val" id="satBoostV"></span></div>
+
+    <h2>③ 花瓣形状</h2>
+    <div class="slider"><span class="lab">宽 Width</span><input type="range" id="w" min="60" max="200" step="1" value="132"><span class="val" id="wV"></span></div>
+    <div class="slider"><span class="lab">高 Height</span><input type="range" id="h" min="80" max="220" step="1" value="158"><span class="val" id="hV"></span></div>
+    <div class="slider"><span class="lab">凹口 Notch</span><input type="range" id="notch" min="8" max="60" step="1" value="30"><span class="val" id="notchV"></span></div>
+
+    <h2>④ 运动</h2>
+    <div class="slider"><span class="lab">翻转速度</span><input type="range" id="spinSpeed" min="0" max="0.06" step="0.001" value="0.018"><span class="val" id="spinSpeedV"></span></div>
+    <div class="slider"><span class="lab">旋转轴</span>
+      <select id="axis">
+        <option value="1,1,0">(1,1,0) 立体翻滚(默认)</option>
+        <option value="-1,1,0">(-1,1,0) 立体翻滚(反向)</option>
+        <option value="0,0,1">(0,0,1) 平面旋转</option>
+        <option value="1,0,0">(1,0,0) 侧翻车轮</option>
+      </select><span></span>
+    </div>
+
+    <div class="readout" id="readout"></div>
+  </div>
+
+  <div class="panel code-wrap">
+<pre><span class="com">// 6 个贝塞尔控制点定义花瓣轮廓(对应原版 _sakuraPetalV3d)</span>
+<span class="com">// front/back 两面用相同轮廓、不同 z,中间留 zDistance 形成厚度</span>
+<span class="kw">function</span> <span class="fn">sakuraControlPoints</span>(w, h, notchLen, z, front) {
+  <span class="kw">const</span> L = -w/<span class="num">2</span>, R = w/<span class="num">2</span>, T = h/<span class="num">2</span>, B = -h/<span class="num">2</span>;
+  <span class="kw">const</span> pts = [
+    [  <span class="num">0</span>, T - notchLen, z ],  <span class="com">// notchCenter 凹口底</span>
+    [ L/<span class="num">2</span>,            T, z ],  <span class="com">// notchLeft</span>
+    [   L,            <span class="num">0</span>, z ],  <span class="com">// mostLeft (贝塞尔控制点)</span>
+    [   <span class="num">0</span>,            B, z ],  <span class="com">// bottomPoint 尖端</span>
+    [   R,            <span class="num">0</span>, z ],  <span class="com">// mostRight (贝塞尔控制点)</span>
+    [ R/<span class="num">2</span>,            T, z ],  <span class="com">// notchRight</span>
+  ];
+  <span class="kw">return</span> front ? pts : pts.slice().reverse();
+}
+
+<span class="com">// 绘制一个面:二次贝塞尔轮廓 + camTheta 光照(最亮时 bri 可 &gt;1,提升亮度)</span>
+<span class="kw">function</span> <span class="fn">drawFace</span>(ctx, p, camTheta, litBri, shadowBri, rgb) {
+  <span class="kw">const</span> t = Math.<span class="fn">max</span>(<span class="num">0</span>, Math.<span class="fn">min</span>(<span class="num">1</span>, camTheta));
+  <span class="kw">const</span> bri = shadowBri + (litBri - shadowBri) * t;   <span class="com">// 在 [shadowBri, litBri] 间插值</span>
+  <span class="kw">const</span> clip = v =&gt; Math.<span class="fn">max</span>(<span class="num">0</span>, Math.<span class="fn">min</span>(<span class="num">255</span>, Math.<span class="fn">round</span>(v * bri)));
+  <span class="kw">const</span> col = <span class="str">`rgb(${clip(rgb[0])},${clip(rgb[1])},${clip(rgb[2])})`</span>;
+  ctx.<span class="fn">beginPath</span>();
+  ctx.<span class="fn">moveTo</span>(p[<span class="num">0</span>].x, p[<span="num">0</span>].y);                 <span class="com">// notchCenter</span>
+  ctx.<span class="fn">lineTo</span>(p[<span class="num">1</span>].x, p[<span="num">1</span>].y);                 <span class="com">// → notchLeft</span>
+  ctx.<span class="fn">quadraticCurveTo</span>(p[<span class="num">2</span>].x, p[<span class="num">2</span>].y, p[<span class="num">3</span>].x, p[<span class="num">3</span>].y);  <span class="com">// 经 mostLeft → bottomPoint</span>
+  ctx.<span class="fn">quadraticCurveTo</span>(p[<span class="num">4</span>].x, p[<span class="num">4</span>].y, p[<span class="num">5</span>].x, p[<span class="num">5</span>].y);  <span class="com">// 经 mostRight → notchRight</span>
+  ctx.<span class="fn">lineTo</span>(p[<span class="num">0</span>].x, p[<span class="num">0</span>].y);                 <span class="com">// → notchCenter</span>
+  ctx.<span class="fn">closePath</span>();
+  ctx.fillStyle = col;  ctx.<span class="fn">fill</span>();
+  ctx.lineWidth = <span class="num">1</span>;    ctx.strokeStyle = col;  ctx.<span class="fn">stroke</span>();
+}</pre>
+    <div class="hint">
+      每帧对每个面:用四元数旋转 6 个控制点 → 算面法线 → <code>camTheta = 法线·视线</code> →
+      剔除背面(camTheta&lt;0)→ 按深度排序 → <code>drawFace</code> 用<b>最亮增益 + 阴影底</b>之间的插值上色。
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ===== 樱花花瓣调节台:在画布中心绘制一个 3D 翻转的花瓣,可实时调色彩/形状 =====
+const cv  = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+
+// --- Sp3dV3D / Quaternion (3D 旋转累积) ---
+const v3 = (x, y, z) => ({ x, y, z });
+const vadd = (a, b) => v3(a.x + b.x, a.y + b.y, a.z + b.z);
+const qIdentity = () => ({ w: 1, x: 0, y: 0, z: 0 });
+function qFromAxisAngle(ax, ay, az, angle) {
+  const l = Math.hypot(ax, ay, az) || 1, half = angle / 2, s = Math.sin(half);
+  return { w: Math.cos(half), x: (ax / l) * s, y: (ay / l) * s, z: (az / l) * s };
+}
+function qMul(a, b) {
+  return {
+    w: a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z,
+    x: a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+    y: a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+    z: a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+  };
+}
+function qNorm(q) { const n = Math.hypot(q.w, q.x, q.y, q.z) || 1; return { w: q.w/n, x: q.x/n, y: q.y/n, z: q.z/n }; }
+function qRotate(q, v) {
+  const { w, x, y, z } = q;
+  const tx = 2*(y*v.z - z*v.y), ty = 2*(z*v.x - x*v.z), tz = 2*(x*v.y - y*v.x);
+  return v3(v.x + w*tx + (y*tz - z*ty), v.y + w*ty + (z*tx - x*tz), v.z + w*tz + (x*ty - y*tx));
+}
+
+// --- HSL → RGB (用于可调色彩) ---
+function hslToRgb(h, s, l) {
+  let r, g, b;
+  if (s === 0) { r = g = b = l; }
+  else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3); g = hue2rgb(p, q, h); b = hue2rgb(p, q, h - 1/3);
+  }
+  return [r * 255, g * 255, b * 255];
+}
+
+// --- 花瓣几何 ---
+function sakuraControlPoints(w, h, notchLen, z, front) {
+  const L = -w/2, R = w/2, T = h/2, B = -h/2;
+  const pts = [v3(0,T-notchLen,z), v3(L/2,T,z), v3(L,0,z), v3(0,B,z), v3(R,0,z), v3(R/2,T,z)];
+  return front ? pts : pts.slice().reverse();
+}
+
+// --- 参数 ---
+const DEFAULTS = { hue:343, sat:88, light:86, litBri:1.20, shadowBri:0.50, satBoost:100,
+                   w:132, h:158, notch:30, spinSpeed:0.018, axis:'1,1,0' };
+const P = { ...DEFAULTS };
+let paused = false;
+let q = qFromAxisAngle(1, 1, 0, 0.4);
+
+// --- 预设(真实樱花品种)---
+const PRESETS = [
+  { name:'染井吉野', en:'Somei Yoshino', desc:'经典·心形凹口',     w:132, h:158, notch:30, hue:343, sat:88, light:86 },
+  { name:'河津桜',   en:'Kawazu',        desc:'大花·深粉',         w:146, h:180, notch:24, hue:340, sat:96, light:76 },
+  { name:'山桜',     en:'Yamazakura',    desc:'野性·淡雅近白',     w:104, h:170, notch:26, hue:346, sat:55, light:93 },
+  { name:'八重桜',   en:'Yaezakura',     desc:'饱满·洋红深粉',     w:150, h:138, notch:38, hue:326, sat:92, light:72 },
+  { name:'彼岸桜',   en:'Higan',         desc:'细长·艳粉',         w:98,  h:178, notch:32, hue:338, sat:93, light:80 },
+  { name:'松月',     en:'Shogetsu',      desc:'柔和·浅色大瓣',     w:142, h:150, notch:22, hue:350, sat:48, light:93 },
+];
+
+// --- 颜色计算 ---
+function baseRGB() {
+  const s2 = Math.min(1, (P.sat/100) * (P.satBoost/100));
+  return hslToRgb(P.hue/360, s2, P.light/100);
+}
+function colorFor(camTheta) {
+  const [r, g, b] = baseRGB();
+  const t = Math.max(0, Math.min(1, camTheta));
+  const bri = P.shadowBri + (P.litBri - P.shadowBri) * t;   // 最亮时 bri 可 > 1
+  const clip = v => Math.max(0, Math.min(255, Math.round(v * bri)));
+  return `rgb(${clip(r)},${clip(g)},${clip(b)})`;
+}
+function drawFace(ctx, p, camTheta) {
+  const col = colorFor(camTheta);
+  ctx.beginPath();
+  ctx.moveTo(p[0].x, p[0].y);
+  ctx.lineTo(p[1].x, p[1].y);
+  ctx.quadraticCurveTo(p[2].x, p[2].y, p[3].x, p[3].y);
+  ctx.quadraticCurveTo(p[4].x, p[4].y, p[5].x, p[5].y);
+  ctx.lineTo(p[0].x, p[0].y);
+  ctx.closePath();
+  ctx.fillStyle = col; ctx.fill();
+  ctx.lineWidth = 1; ctx.strokeStyle = col; ctx.stroke();
+}
+
+// --- 场景 ---
+const ZD = 24;
+const camX = W/2, camY = H/2, camZ = 420;
+const pos  = v3(W/2, H/2, 0);
+
+function axisVec() { const [x,y,z] = P.axis.split(',').map(Number); return v3(x,y,z); }
+
+function frame() {
+  if (!paused) { const a = axisVec(); q = qNorm(qMul(q, qFromAxisAngle(a.x, a.y, a.z, P.spinSpeed))); }
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "#eee"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+
+  const faces = [];
+  for (const front of [true, false]) {
+    const normal = qRotate(q, front ? v3(0,0,1) : v3(0,0,-1));
+    const center = vadd(pos, qRotate(q, v3(0, 0, front ? ZD/2 : -ZD/2)));
+    const vx = camX - center.x, vy = camY - center.y, vz = camZ - center.z;
+    const dist = Math.hypot(vx, vy, vz) || 1;
+    const camTheta = normal.x*vx/dist + normal.y*vy/dist + normal.z*vz/dist;
+    if (camTheta < 0) continue;                                  // 背面剔除
+    const pts = sakuraControlPoints(P.w, P.h, P.notch, front ? ZD/2 : -ZD/2, front).map(lp => {
+      const wp = vadd(pos, qRotate(q, lp));
+      return { x: wp.x, y: H - wp.y };                          // 投影 + Y 翻转(凹口朝上)
+    });
+    faces.push({ pts, camTheta, dist });
+  }
+  faces.sort((a, b) => b.dist - a.dist);
+  for (const f of faces) drawFace(ctx, f.pts, f.camTheta);
+
+  requestAnimationFrame(frame);
+}
+
+// --- UI 绑定 ---
+const IDS = ['hue','sat','light','litBri','shadowBri','satBoost','w','h','notch','spinSpeed'];
+function readControls() { IDS.forEach(k => { P[k] = parseFloat(document.getElementById(k).value); }); P.axis = document.getElementById('axis').value; }
+function syncReadout() {
+  IDS.forEach(k => {
+    const el = document.getElementById(k + 'V');
+    if (!el) return;
+    el.textContent = (k === 'satBoost') ? P[k] + '%' : (k === 'spinSpeed' ? P[k].toFixed(3) : (Number.isInteger(P[k]) ? P[k] : P[k].toFixed(2)));
+  });
+  // 色块预览
+  const [r,g,b] = baseRGB();
+  const clipMax = v => Math.max(0, Math.min(255, Math.round(v * P.litBri)));
+  const clipMin = v => Math.max(0, Math.min(255, Math.round(v * P.shadowBri)));
+  document.getElementById('swMax').style.background = `rgb(${clipMax(r)},${clipMax(g)},${clipMax(b)})`;
+  document.getElementById('swMin').style.background = `rgb(${clipMin(r)},${clipMin(g)},${clipMin(b)})`;
+  // 数值文本
+  const hsl = document.getElementById('readout');
+  const [br,bg,bb] = baseRGB().map(v => Math.round(v));
+  hsl.innerHTML =
+    `<b>// 当前数值(可直接抄走)</b>\n` +
+    `色彩: hue=${P.hue}  sat=${P.sat}  light=${P.light}  satBoost=${P.satBoost}%\n` +
+    `亮度: litBri=${P.litBri.toFixed(2)}  shadowBri=${P.shadowBri.toFixed(2)}\n` +
+    `形状: w=${P.w}  h=${P.h}  notch=${P.notch}\n` +
+    `运动: spinSpeed=${P.spinSpeed.toFixed(3)}  axis=(${P.axis})\n` +
+    `基础色 RGB = [${br}, ${bg}, ${bb}]`;
+}
+
+// 渲染预设按钮
+function renderPresets() {
+  const wrap = document.getElementById('presets');
+  wrap.innerHTML = '';
+  PRESETS.forEach(ps => {
+    const btn = document.createElement('div');
+    btn.className = 'preset-btn';
+    const [r,g,b] = hslToRgb(ps.hue/360, ps.sat/100, ps.light/100).map(v => Math.round(v));
+    btn.innerHTML = `<span class="pk" style="background:rgb(${r},${g},${b})"></span>` +
+                    `<span class="pn">${ps.name}</span> <span class="pd">${ps.desc}</span>`;
+    btn.onclick = () => {
+      Object.assign(P, { w:ps.w, h:ps.h, notch:ps.notch, hue:ps.hue, sat:ps.sat, light:ps.light });
+      ['w','h','notch','hue','sat','light'].forEach(k => document.getElementById(k).value = P[k]);
+      document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      syncReadout();
+    };
+    wrap.appendChild(btn);
+  });
+}
+
+// 滑杆 / 选择 监听
+IDS.forEach(k => document.getElementById(k).addEventListener('input', () => { readControls(); syncReadout(); }));
+document.getElementById('axis').addEventListener('change', () => { readControls(); syncReadout(); });
+
+document.getElementById('pauseBtn').onclick = function() { paused = !paused; this.textContent = paused ? '播放' : '暂停'; };
+document.getElementById('resetBtn').onclick = () => {
+  Object.assign(P, DEFAULTS);
+  IDS.forEach(k => document.getElementById(k).value = P[k]);
+  document.getElementById('axis').value = P.axis;
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  syncReadout();
+};
+
+// 初始化
+renderPresets();
+readControls();
+syncReadout();
+frame();
+</script>
+</body>
+</html>

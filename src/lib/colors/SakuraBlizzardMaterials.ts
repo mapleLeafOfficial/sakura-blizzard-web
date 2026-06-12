@@ -15,8 +15,9 @@ export interface Sp3dColor {
 }
 
 export const SakuraBlizzardMaterials = {
-  /// Color.fromARGB(255, 254, 238, 237) — cherry-blossom petal pinkish white.
-  sakura: { r: 254, g: 238, b: 237 } as Sp3dColor,
+  /// Cherry-blossom petal pink (tuned: hue343/sat88/light86). Pinker than the
+  /// source's near-white [254,238,237] so it reads as sakura even when brightened.
+  sakura: { r: 251, g: 188, b: 206 } as Sp3dColor,
   /// Color.fromARGB(255, 255, 235, 59) — yellow.
   yellow: { r: 255, g: 235, b: 59 } as Sp3dColor,
 };
