@@ -1,4 +1,5 @@
 import { Sp3dV3D } from "../math/Sp3dV3D";
+import { Quaternion } from "../math/Quaternion";
 import { VRange } from "../math/VRange";
 import { Sp3dConstantValues } from "../math/constants";
 import type { Size } from "../math/Size";
@@ -17,35 +18,49 @@ export interface EngineOptions {
   resetRandomX: boolean;
 }
 
+/// 软件正交投影后的 2D 点。
+interface Pt2 {
+  x: number;
+  y: number;
+}
+
+/// 一个待绘制的面(软件 3D 管线产物,对应 Sp3dFaceObj)。
+interface RenderFace {
+  /// 6 个投影后的贝塞尔控制点(notchCenter, notchLeft, mostLeft[ctrl],
+  /// bottomPoint, mostRight[ctrl], notchRight)。
+  pts: Pt2[];
+  /// 面法线·视线,已剔除背面故 ∈ [0,1]。
+  camTheta: number;
+  /// 面中心到相机的距离,用于 painter's algorithm 深度排序。
+  dist: number;
+  material: { r: number; g: number; b: number };
+}
+
 ///
-// (en) Decomposes a 3D axis rotation into the two 2D-renderable scalars.
-//      The PHYSICS (angularVelocity) is exact; only the screen projection is a
-//      Canvas-2D approximation: a screen-normal axis (z) maps to ctx.rotate,
-//      a tilted axis (e.g. (1,1,0)) maps to a flip via ctx.scale(cos, 1).
-// (ja) 3D 軸回転を 2D 描画可能な2つのスカラーに分解。物理量は厳密、投影のみ近似。
+// (en) Accumulates angularVelocity about rotateAxis into the orientation
+//      quaternion. This is the input to the "vertex transform" stage — the
+//      renderer later rotates local control points by obj.rotation.
+//      (Plan B: true 3D accumulation; replaces the old rotationZ/flip split.)
+// (ja) angularVelocity をクォータニオンに蓄積する(真の3D回転)。
 ///
 function applyAngularDelta(obj: Sp3dObj, axis: Sp3dV3D, angle: number): void {
-  const nz = Math.abs(axis.nor().z);
-  if (nz > 0.5) {
-    // Screen-normal axis: pure in-plane rotation.
-    obj.rotationZ += angle;
-  } else {
-    // Tilted axis: petal tumble, faked as an x-flip.
-    obj.flip += angle;
-  }
+  obj.rotation = obj.rotation
+    .multiply(Quaternion.fromAxisAngle(axis, angle))
+    .normalize();
 }
 
 ///
 // (en) Updates one object's position/rotation for a single tick.
-//      1:1 port of ElementsFlowView.updateObjPosition.
-//
+//      1:1 port of ElementsFlowView.updateObjPosition (rotation via quaternion).
 //      CRITICAL: physics.velocity is read EXACTLY ONCE — it advances internal
 //      state (hirahira counter, burst velocity, phase machine) as a side effect.
-// (ja) 1フレーム分の位置・回転更新。ElementsFlowView.updateObjPosition の 1:1 移植。
-//      velocity は副作用で状態を進めるため、1回のみ参照する。
+// (ja) 1フレーム分の更新。ElementsFlowView.updateObjPosition の 1:1 移植。
 ///
-// 1:1 port of: lib/src/views/elements_flow_view.dart → updateObjPosition
-export function updateObjPosition(obj: Sp3dObj, viewSize: Size, opts: EngineOptions): void {
+export function updateObjPosition(
+  obj: Sp3dObj,
+  viewSize: Size,
+  opts: EngineOptions,
+): void {
   const physics = obj.physics;
   if (!physics) return;
 
@@ -65,16 +80,17 @@ export function updateObjPosition(obj: Sp3dObj, viewSize: Size, opts: EngineOpti
           0,
         );
       } else {
-        obj.position = obj.position.add(new Sp3dV3D(0, viewSize.height * 1.125, 0));
+        obj.position = obj.position.add(
+          new Sp3dV3D(0, viewSize.height * 1.125, 0),
+        );
       }
     }
   }
 
-  // object rotation
+  // object rotation: obj.rotateInPlace(axis, angularVelocity) via quaternion.
   const axis = physics.rotateAxis;
   const av = physics.angularVelocity;
   if (axis !== null && av !== null) {
-    // obj.rotateInPlace(axis, angularVelocity) — projected to 2D above.
     applyAngularDelta(obj, axis, av);
   }
 }
@@ -121,7 +137,7 @@ export function createSakuraPetalObj(
   const obj = UtilSakuraCreator.sakuraPetal(objSize / 1.5, objSize, objSize / 6);
   obj.physics = physics;
 
-  // r.rotate(rotateAxis, rand * 360deg) — initial random orientation.
+  // r.rotate(rotateAxis, rand * 360deg) — initial random orientation (3D).
   if (physics.rotateAxis !== null) {
     const angle = Math.random() * 360 * Sp3dConstantValues.toRadian;
     applyAngularDelta(obj, physics.rotateAxis, angle);
@@ -141,17 +157,49 @@ export function createSakuraPetalObj(
 }
 
 ///
-// (en) Renders all layers to the canvas. Orthographic projection: z is ignored,
-//      objects are drawn in layer order (back first, so front overlays).
+// (en) The 6 local Bézier control points of one petal face (front or back).
+//      Order: notchCenter, notchLeft, mostLeft(ctrl), bottomPoint,
+//      mostRight(ctrl), notchRight — traced as two quadratic Béziers, matching
+//      _sakuraPetalV3d exactly. Back face is reversed (source does .reversed).
+// (ja) 花びら1面の6個のローカルベジェ制御点。
+///
+function sakuraControlPoints(
+  p: { w: number; h: number; notchLen: number; zDistance: number },
+  front: boolean,
+): Sp3dV3D[] {
+  const left = -p.w / 2;
+  const right = p.w / 2;
+  const top = p.h / 2;
+  const bottom = -p.h / 2;
+  const z = front ? p.zDistance / 2 : -p.zDistance / 2;
+  const pts = [
+    new Sp3dV3D(0, top - p.notchLen, z), // notchCenter
+    new Sp3dV3D(left / 2, top, z), // notchLeft
+    new Sp3dV3D(left, 0, z), // mostLeft (Bézier control)
+    new Sp3dV3D(0, bottom, z), // bottomPoint
+    new Sp3dV3D(right, 0, z), // mostRight (Bézier control)
+    new Sp3dV3D(right / 2, top, z), // notchRight
+  ];
+  return front ? pts : pts.slice().reverse();
+}
+
+///
+// (en) Software-3D render pipeline (Plan B). Mirrors simple_3d_renderer:
+//      camera.getPrams (vertex transform + face normal + camTheta + dist +
+//      back-face cull) → painter's-algorithm depth sort → Sp3dLight.apply
+//      shading → canvas drawPath per face.
 //
-//      Y-AXIS FLIP (mirrors simple_3d_renderer's projection): the physics work
-//      in a world where +Y is UP (standard right-handed 3D), so falling is
-//      velocity.y = -1 and recycling happens when y < -height/8. The renderer
-//      flips Y when mapping to the screen (where +Y is DOWN). We must do the
-//      same here, otherwise petals fly upward instead of falling.
-// (ja) 全レイヤをキャンバスに描画。正交投影:z は無視、レイヤ順に描画。
-//      物理は +Y が上向きの世界座標で動くため、画面 (+Y 下向き) への
-//      投影で Y を反転する（simple_3d_renderer と同じ）。
+//      For each petal, for each face (front/back):
+//        1. Rotate local control points by the orientation quaternion and
+//           translate by position → world-space control points (Bézier is
+//           affine-invariant, so transforming the controls transforms the
+//           whole curve exactly).
+//        2. Face normal = quaternion · local (0,0,±1).
+//        3. camTheta = dot(normal, normalize(faceCenter → camera)).
+//        4. Cull back faces (camTheta < 0).
+//        5. Project to screen (orthographic; Y flipped to screen-down).
+//      Then depth-sort all faces (far first) and draw each shaded by camTheta.
+// (ja) ソフトウェア3Dレンダリングパイプライン。
 ///
 export function drawScene(
   ctx: CanvasRenderingContext2D,
@@ -159,81 +207,96 @@ export function drawScene(
   viewSize: Size,
   minBrightness: number,
 ): void {
-  ctx.clearRect(0, 0, viewSize.width, viewSize.height);
-  ctx.save();
-  // Flip world-Y (up) to screen-Y (down), matching simple_3d_renderer.
-  ctx.translate(0, viewSize.height);
-  ctx.scale(1, -1);
+  // Camera at screen center, looking toward -z (matches ElementsFlowView:
+  // Sp3dOrthographicCamera at (w/2, h/2, 3000)).
+  const camX = viewSize.width / 2;
+  const camY = viewSize.height / 2;
+  const camZ = 3000;
+
+  const faces: RenderFace[] = [];
   for (const objs of layers) {
     for (const obj of objs) {
-      drawPetal(ctx, obj, minBrightness);
+      if (!obj.petalParams) continue; // only petal-shaped objects so far
+      const p = obj.petalParams;
+      const rot = obj.rotation;
+      for (const front of [true, false]) {
+        // Face normal: rotated local +z (front) / -z (back).
+        const localNormal = front ? new Sp3dV3D(0, 0, 1) : new Sp3dV3D(0, 0, -1);
+        const normal = rot.rotate(localNormal);
+        // Face center: position + rotated local (0,0,±zDistance/2).
+        const localCenter = new Sp3dV3D(
+          0,
+          0,
+          front ? p.zDistance / 2 : -p.zDistance / 2,
+        );
+        const cx = obj.position.x;
+        const cy = obj.position.y;
+        const cz = obj.position.z;
+        const cc = rot.rotate(localCenter);
+        const centerX = cx + cc.x;
+        const centerY = cy + cc.y;
+        const centerZ = cz + cc.z;
+        // View direction: face center → camera.
+        const vx = camX - centerX;
+        const vy = camY - centerY;
+        const vz = camZ - centerZ;
+        const dist = Math.sqrt(vx * vx + vy * vy + vz * vz);
+        const inv = dist === 0 ? 0 : 1 / dist;
+        const camTheta =
+          normal.x * vx * inv + normal.y * vy * inv + normal.z * vz * inv;
+        if (camTheta < 0) continue; // back-face cull (mirrors source)
+        // Transform control points: local → world (rotate + translate) → screen.
+        const pts: Pt2[] = sakuraControlPoints(p, front).map((lp) => {
+          const wp = rot.rotate(lp);
+          return {
+            x: obj.position.x + wp.x,
+            y: viewSize.height - (obj.position.y + wp.y), // orthographic + Y flip
+          };
+        });
+        faces.push({ pts, camTheta, dist, material: obj.material });
+      }
     }
   }
-  ctx.restore();
+
+  // Painter's algorithm: draw far faces first (descending dist).
+  faces.sort((a, b) => b.dist - a.dist);
+
+  ctx.clearRect(0, 0, viewSize.width, viewSize.height);
+  for (const f of faces) {
+    drawFace(ctx, f, minBrightness);
+  }
 }
 
 ///
-// (en) Draws one petal. When petalParams is present the outline is traced as
-//      true quadratic Bézier curves — a 1:1 match for the source petal, whose
-//      two edges are bezierCurve(notchLeft, mostLeft, bottomPoint) and
-//      bezierCurve(bottomPoint, mostRight, notchRight). Canvas quadraticCurveTo
-//      takes the same (controlPoint, endPoint), so the curves are exact, not
-//      sampled. Shading uses minBrightness (Sp3dLight) brightened by how
-//      face-on the petal is; the 1px stroke mirrors Sp3dMaterial strokeWidth.
-// (ja) 花びら1枚を描画。petalParams があれば真の二次ベジェ曲線で輪郭を描く。
+// (en) Draws one face: Bézier outline (quadraticCurveTo, 1:1 with the source
+//      petal) filled + stroked with camTheta-shaded color.
+// (ja) 1面を描画:ベジェ輪郭を camTheta シェード色で塗りつぶし+枠線。
 ///
-function drawPetal(
+function drawFace(
   ctx: CanvasRenderingContext2D,
-  obj: Sp3dObj,
+  f: RenderFace,
   minBrightness: number,
 ): void {
-  ctx.save();
-  ctx.translate(obj.position.x, obj.position.y);
-  ctx.rotate(obj.rotationZ);
-  // Tilted-axis tumble is faked as an x-scale of cos(flip): 1 → 0 → -1 → 0 → 1,
-  // which reads as the petal turning edge-on then showing its back.
-  const c = Math.cos(obj.flip);
-  ctx.scale(c, 1);
-
+  // Shading (1:1 Sp3dLight.apply, syncCam):
+  //   brightness = camTheta.clamp(0,1); if < minBrightness then minBrightness;
+  //   color = fillColor * brightness (per-channel RGB multiply).
+  const brightness = Math.max(minBrightness, Math.min(1, f.camTheta));
+  const { r, g, b } = f.material;
+  const col = `rgb(${Math.round(r * brightness)},${Math.round(
+    g * brightness,
+  )},${Math.round(b * brightness)})`;
+  const p = f.pts;
   ctx.beginPath();
-  if (obj.petalParams) {
-    const { w, h, notchLen } = obj.petalParams;
-    const left = -w / 2;
-    const right = w / 2;
-    const top = h / 2;
-    const bottom = -h / 2;
-    // Control points from _sakuraPetalV3d, traced as quadratic Béziers.
-    ctx.moveTo(0, top - notchLen); // notchCenter
-    ctx.lineTo(left / 2, top); // notchLeft
-    ctx.quadraticCurveTo(left, 0, 0, bottom); // via mostLeft → bottomPoint
-    ctx.quadraticCurveTo(right, 0, right / 2, top); // via mostRight → notchRight
-    ctx.lineTo(0, top - notchLen); // back to notchCenter
-  } else {
-    // Polygon fallback for non-petal objects.
-    const outline = obj.vertices.slice(0, obj.frontCount);
-    for (let i = 0; i < outline.length; i++) {
-      const p = outline[i];
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    }
-  }
+  ctx.moveTo(p[0].x, p[0].y);
+  ctx.lineTo(p[1].x, p[1].y);
+  ctx.quadraticCurveTo(p[2].x, p[2].y, p[3].x, p[3].y);
+  ctx.quadraticCurveTo(p[4].x, p[4].y, p[5].x, p[5].y);
+  ctx.lineTo(p[0].x, p[0].y);
   ctx.closePath();
-
-  // Shading (faithful to Sp3dLight.apply + camera.camTheta):
-  //   camTheta = dot(face normal, view dir); visible face ∈ [0,1], 1=head-on.
-  //   brightness = camTheta.clamp(0,1); if < minBrightness then minBrightness.
-  //   color = fillColor * brightness  (per-channel RGB multiply, NOT alpha —
-  //   the petal stays opaque and just darkens, exactly like the source).
-  // Our single-layer flip approximation shows |cos(flip)| as face-on-ness.
-  const camTheta = Math.abs(c);
-  const brightness = Math.max(minBrightness, camTheta);
-  const { r, g, b } = obj.material;
-  const col = `rgb(${Math.round(r * brightness)},${Math.round(g * brightness)},${Math.round(b * brightness)})`;
   ctx.fillStyle = col;
   ctx.fill();
   // 1px stroke mirrors Sp3dMaterial(fillColor, true, strokeWidth=1, fillColor).
   ctx.lineWidth = 1;
   ctx.strokeStyle = col;
   ctx.stroke();
-  ctx.restore();
 }

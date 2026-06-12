@@ -1,4 +1,5 @@
 import { Sp3dV3D } from "../math/Sp3dV3D";
+import { Quaternion } from "../math/Quaternion";
 import { SakuraBlizzardMaterials } from "../colors/SakuraBlizzardMaterials";
 import type { Sp3dObj } from "../engine/types";
 
@@ -100,11 +101,10 @@ export class UtilSakuraCreator {
       material: SakuraBlizzardMaterials.sakura,
       physics: null,
       position: new Sp3dV3D(0, 0, 0),
-      rotationZ: 0,
-      flip: 0,
-      // Expose the exact control points so the renderer can draw true Bézier
-      // curves (the sample points above are a polygon approximation).
-      petalParams: { w, h, notchLen },
+      rotation: Quaternion.identity(),
+      // Expose control points + zDistance so the software-3D renderer can
+      // transform them by the quaternion and draw true Bézier curves.
+      petalParams: { w, h, notchLen, zDistance },
     };
   }
 }
